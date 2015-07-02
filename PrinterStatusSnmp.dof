@@ -123,8 +123,9 @@ CodePage=1251
 Count=1
 Item0=WinTypes=Windows;WinProcs=Windows;DbiTypes=BDE;DbiProcs=BDE;DbiErrs=BDE;
 [HistoryLists\hlSearchPath]
-Count=1
+Count=2
 Item0=$(DELPHI)\Lib\Debug;E:\DelphiComponents\jvcl\lib\D7\debug;E:\DelphiComponents\jcl\lib\d7\debug;../CommonUnits
+Item1=$(DELPHI)\Lib\Debug;E:\DelphiComponents\jvcl\lib\D7\debug;E:\DelphiComponents\jcl\lib\d7\debug;../CommonUnits;../DelphiRus
 [HistoryLists\hlUnitOutputDirectory]
 Count=1
 Item0=./objs

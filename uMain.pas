@@ -7,9 +7,15 @@ uses
   Dialogs, IdBaseComponent, IdComponent, IdUDPBase, IdUDPClient, IdSNMP,
   StdCtrls, ExtCtrls, JvExControls, JvComCtrls,
 
-  uConsts, uSupvis, uLinker, uBinSpecTask, uTOOThread, uTOOSpecTask;
+  uConsts, uSupvis, uLinker, uBinSpecTask, uTOOThread, uTOOSpecTask,
+  JvComponentBase, JvTrayIcon;
+
 const
   STATUS_NOLINK = 0;
+
+var
+  TASKS_QUIT_MSG : LongWord = 0;
+
 type
   TMySpecTask = class(TTOOSpecTask)
   private
@@ -33,6 +39,7 @@ type
     SNMP: TIdSNMP;
     tmrMain: TTimer;
     mmoMain: TMemo;
+    trayIcon: TJvTrayIcon;
     procedure FormCreate(Sender: TObject);
     procedure FormClose(Sender: TObject; var Action: TCloseAction);
     procedure tmrMainTimer(Sender: TObject);
@@ -40,8 +47,10 @@ type
     { Private declarations }
     m_SpecTask : TMySpecTask;
     m_printers : array of TMyPrinter;
+    m_halt : boolean;
     procedure RequestPrintersState;
     procedure Log(const aMsg : string);
+    procedure OnMsg(var Msg: TMsg; var Handled: Boolean);
   public
     { Public declarations }
   end;
@@ -69,18 +78,37 @@ end;
 
 procedure TfrmMain.FormCreate(Sender: TObject);
 var
-   i : integer;
+   i, msTimer : integer;
 begin
-  Log('Begin work');
-  m_SpecTask := TMySpecTask.create(ExtractFileName(ParamStr(0)), nil);
-  Log('Task ''' + m_SpecTask.TaskName + '''');
-  m_SpecTask.connect(false);
-  Log('Connected TOO');
-  SetLength(m_printers, m_SpecTask.VarCount);
-  for i := low(m_printers) to high(m_printers) do
-  begin
-    m_printers[i].infoReceived := false;
-    m_printers[i].varToo := m_SpecTask.Variable[i];
+  Application.OnMessage := OnMsg;
+  try
+    trayIcon.Icon.Assign(Application.Icon);
+    trayIcon.Hint := Application.Title;
+    Log('Begin work');
+    if (ParamCount > 1) then
+    begin
+      msTimer := StrToIntDef(ParamStr(2), 0);
+      if (msTimer > 0) then
+        tmrMain.Interval := msTimer;
+    end;
+    Log('Polling interval: ' + IntToStr(tmrMain.Interval) + 'ms');
+    m_SpecTask := TMySpecTask.create(ExtractFileName(ParamStr(0)), nil);
+    Log('Task ''' + m_SpecTask.TaskName + '''');
+    m_SpecTask.connect(false);
+    Log('Connected TOO');
+    SetLength(m_printers, m_SpecTask.VarCount);
+    for i := low(m_printers) to high(m_printers) do
+    begin
+      m_printers[i].infoReceived := false;
+      m_printers[i].varToo := m_SpecTask.Variable[i];
+    end;
+  except
+    on e : Exception do
+    begin
+      Log('!!! Error: ' + e.Message);
+      Application.MessageBox(PAnsiChar(e.Message), PAnsiChar(Application.Title), MB_ICONERROR or MB_OK or MB_TOPMOST or MB_APPLMODAL);
+      m_halt := true;
+    end;
   end;
 end;
 
@@ -101,8 +129,7 @@ end;
 
 procedure TfrmMain.RequestPrintersState;
 var
-  i, j : integer;
-  s : string;
+  i : integer;
 begin
   for i := low(m_printers) to high(m_printers) do
   begin
@@ -141,8 +168,9 @@ begin
       m_printers[i].hrPrinterStatus := STATUS_NOLINK;
     if (not m_SpecTask.writeVar(m_printers[i].varToo, @m_printers[i].hrPrinterStatus)) then
     begin
-      Log('! ERROR write variable ''' + m_printers[i].varToo.name + '''');
+      Log('!!! ERROR write variable ''' + m_printers[i].varToo.name + '''');
     end;
+    Application.ProcessMessages();
   end;
 end;
 
@@ -153,7 +181,21 @@ end;
 
 procedure TfrmMain.tmrMainTimer(Sender: TObject);
 begin
+  if (m_halt) then
+    Close();
   RequestPrintersState();
 end;
+
+procedure TfrmMain.OnMsg(var Msg: TMsg; var Handled: Boolean);
+begin
+  if (Msg.message = TASKS_QUIT_MSG) then
+  begin
+    close();
+    Handled := true;
+  end;
+end;
+
+initialization
+  TASKS_QUIT_MSG := RegisterWindowMessage('TASKS_QUIT');
 
 end.

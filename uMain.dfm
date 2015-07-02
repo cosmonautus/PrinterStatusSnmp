@@ -40,9 +40,15 @@ object frmMain: TfrmMain
     Top = 12
   end
   object tmrMain: TTimer
-    Interval = 5000
     OnTimer = tmrMainTimer
     Left = 56
+    Top = 12
+  end
+  object trayIcon: TJvTrayIcon
+    Active = True
+    IconIndex = 0
+    Visibility = [tvAutoHide, tvRestoreClick, tvMinimizeClick]
+    Left = 108
     Top = 12
   end
 end
