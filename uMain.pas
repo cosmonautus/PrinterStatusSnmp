@@ -7,8 +7,8 @@ uses
   Dialogs, IdBaseComponent, IdComponent, IdUDPBase, IdUDPClient, IdSNMP,
   StdCtrls, ExtCtrls, JvExControls, JvComCtrls,
 
-  uConsts, uSupvis, uLinker, uBinSpecTask, uTOOThread, uTOOSpecTask,
-  JvComponentBase, JvTrayIcon;
+  uConsts, uSupvis, uLinker, uBinSpecTask, uGlobalCommon, uTOOThread, uTOOSpecTask,
+  JvComponentBase, JvTrayIcon, Menus;
 
 const
   STATUS_NOLINK = 0;
@@ -38,18 +38,21 @@ type
   TfrmMain = class(TForm)
     SNMP: TIdSNMP;
     tmrMain: TTimer;
-    mmoMain: TMemo;
-    trayIcon: TJvTrayIcon;
+    memLog: TMemo;
+    trayMain: TJvTrayIcon;
+    mnuMain: TMainMenu;
+    N1: TMenuItem;
+    N2: TMenuItem;
     procedure FormCreate(Sender: TObject);
     procedure FormClose(Sender: TObject; var Action: TCloseAction);
     procedure tmrMainTimer(Sender: TObject);
+    procedure N2Click(Sender: TObject);
   private
     { Private declarations }
     m_SpecTask : TMySpecTask;
     m_printers : array of TMyPrinter;
-    m_halt : boolean;
     procedure RequestPrintersState;
-    procedure Log(const aMsg : string);
+    procedure logMsg(const aMsg : string);
     procedure OnMsg(var Msg: TMsg; var Handled: Boolean);
   public
     { Public declarations }
@@ -61,6 +64,18 @@ var
 implementation
 
 {$R *.dfm}
+
+procedure SetWindowCloseFlag(const aWin : THandle; const aEnable : Boolean);
+var
+  mnu : HMENU;
+begin
+  mnu := GetSystemMenu(aWin, false);
+  if (mnu <> 0) then
+    if aEnable then
+      EnableMenuItem(mnu, 6, MF_BYPOSITION or MF_ENABLED)
+    else
+      EnableMenuItem(mnu, 6, MF_BYPOSITION or MF_DISABLED);
+end;
 
 { TMySpecTask }
 
@@ -80,34 +95,44 @@ procedure TfrmMain.FormCreate(Sender: TObject);
 var
    i, msTimer : integer;
 begin
+  SetWindowCloseFlag(Handle, False);
   Application.OnMessage := OnMsg;
+  trayMain.Icon.Assign(Application.Icon);
+  trayMain.HideApplication();
+  trayMain.Hint := Application.Title;
+  Caption := Application.Title;
   try
-    trayIcon.Icon.Assign(Application.Icon);
-    trayIcon.Hint := Application.Title;
-    Log('Begin work');
-    if (ParamCount > 1) then
-    begin
-      msTimer := StrToIntDef(ParamStr(2), 0);
-      if (msTimer > 0) then
-        tmrMain.Interval := msTimer;
+    logMsg('Запуск');
+    case ParamCount of
+      1 : msTimer := StrToIntDef(ParamStr(1), 1000);
+      2 : msTimer := StrToIntDef(ParamStr(2), 1000);
+      else
+        msTimer := 1000;
     end;
-    Log('Polling interval: ' + IntToStr(tmrMain.Interval) + 'ms');
-    m_SpecTask := TMySpecTask.create(ExtractFileName(ParamStr(0)), nil);
-    Log('Task ''' + m_SpecTask.TaskName + '''');
-    m_SpecTask.connect(false);
-    Log('Connected TOO');
+    tmrMain.Interval := msTimer;
+
+    logMsg('Период обновления данных: ' + IntToStr(tmrMain.Interval) + ' мс');
+
+    if (ParamCount > 1) then
+      m_specTask := TMySpecTask.createFromCmd(nil)
+    else
+      m_specTask := TMySpecTask.create(ExtractFileName(ParamStr(0)), nil);
+
+    logMsg('Регистрация задачи "' + m_SpecTask.TaskName + '"');
     SetLength(m_printers, m_SpecTask.VarCount);
     for i := low(m_printers) to high(m_printers) do
     begin
       m_printers[i].infoReceived := false;
       m_printers[i].varToo := m_SpecTask.Variable[i];
     end;
+    m_SpecTask.connect(false);
+    tmrMain.Enabled := True;
+    logMsg('Ок');
   except
     on e : Exception do
     begin
-      Log('!!! Error: ' + e.Message);
-      Application.MessageBox(PAnsiChar(e.Message), PAnsiChar(Application.Title), MB_ICONERROR or MB_OK or MB_TOPMOST or MB_APPLMODAL);
-      m_halt := true;
+      logMsg('ОШИБКА! ' + e.Message);
+      raise;
     end;
   end;
 end;
@@ -116,12 +141,14 @@ procedure TfrmMain.FormClose(Sender: TObject; var Action: TCloseAction);
 var
   i : integer;
 begin
+  tmrMain.Enabled := false;
   if (m_SpecTask.connected) then
   begin
     for i := low(m_printers) to high(m_printers) do
     begin
       m_printers[i].hrPrinterStatus := STATUS_NOLINK;
       m_SpecTask.writeVar(m_printers[i].varToo, @m_printers[i].hrPrinterStatus);
+      m_SpecTask.writeVar(m_printers[i].varToo, nil);
     end;
   end;
   FreeAndNil(m_SpecTask);
@@ -161,38 +188,50 @@ begin
         m_printers[i].sysName := SNMP.Reply.Value[1];
         m_printers[i].sysDescr := SNMP.Reply.Value[2];
         m_printers[i].infoReceived := true;
-        Log('New printer: ''' + m_printers[i].sysName + ''' (' + m_printers[i].sysDescr + ')');
+        logMsg('Информация об устройстве: ' + m_printers[i].varToo.param);
+        logMsg('Имя: ' + m_printers[i].sysName);
+        logMsg('Описание: ' + m_printers[i].sysDescr);
       end;
     end
     else
       m_printers[i].hrPrinterStatus := STATUS_NOLINK;
     if (not m_SpecTask.writeVar(m_printers[i].varToo, @m_printers[i].hrPrinterStatus)) then
     begin
-      Log('!!! ERROR write variable ''' + m_printers[i].varToo.name + '''');
+      logMsg('ОШИБКА! записи переменной "' + m_printers[i].varToo.name + '"');
     end;
-    Application.ProcessMessages();
   end;
 end;
 
-procedure TfrmMain.Log(const aMsg: string);
+procedure TfrmMain.logMsg(const aMsg: string);
 begin
-  mmoMain.Lines.Add(TimeToStr(Now()) + '  ' + aMsg);
+  memLog.Lines.Add(TimeToStr(Now()) + ': ' + aMsg);
+  memLog.SelStart := Length(memLog.Text);
 end;
 
 procedure TfrmMain.tmrMainTimer(Sender: TObject);
 begin
-  if (m_halt) then
-    Close();
   RequestPrintersState();
 end;
+
+var
+  TASKS_QUIT_MSG_received : Boolean = false;
 
 procedure TfrmMain.OnMsg(var Msg: TMsg; var Handled: Boolean);
 begin
   if (Msg.message = TASKS_QUIT_MSG) then
   begin
-    close();
+    if (not TASKS_QUIT_MSG_received) then
+    begin
+      TASKS_QUIT_MSG_received := True;
+      Close();
+    end;
     Handled := true;
   end;
+end;
+
+procedure TfrmMain.N2Click(Sender: TObject);
+begin
+  Close();
 end;
 
 initialization
